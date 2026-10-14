@@ -1,49 +1,40 @@
 import { useState, useEffect } from 'react';
-import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/firebase/config';
 import { Product } from '@/types';
 
-export const useProducts = (options?: { onlyActive?: boolean, category?: string }) => {
+export const useProducts = ({ onlyActive = false } = {}) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
-    let q = collection(db, 'products');
+    const fetchProducts = async () => {
+      try {
+        setLoading(true);
+        // Empezamos asumiendo que queremos todos
+        let q: any = collection(db, 'products');
+        
+        // Si pedimos solo activos (como en el catálogo), filtramos SIN orderBy
+        if (onlyActive) {
+          q = query(collection(db, 'products'), where('activo', '==', true));
+        }
 
-    // Construcción dinámica de la query
-    const constraints = [];
-    if (options?.onlyActive) {
-      constraints.push(where('activo', '==', true));
-    }
-    if (options?.category && options.category !== 'Todos') {
-      constraints.push(where('categoria', '==', options.category));
-    }
-    
-    // Default sort
-    constraints.push(orderBy('nombre', 'asc'));
-
-    const finalQuery = query(q, ...constraints);
-
-    const unsubscribe = onSnapshot(finalQuery, 
-      (snapshot) => {
+        const snapshot = await getDocs(q);
         const productsData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as Product[];
+
         setProducts(productsData);
-        setLoading(false);
-      },
-      (err) => {
-        console.error("Error fetching products:", err);
-        setError(err.message);
+      } catch (error) {
+        console.error("Error fetching products:", error);
+      } finally {
         setLoading(false);
       }
-    );
+    };
 
-    return () => unsubscribe();
-  }, [options?.onlyActive, options?.category]);
+    fetchProducts();
+  }, [onlyActive]);
 
-  return { products, loading, error };
+  return { products, loading };
 };

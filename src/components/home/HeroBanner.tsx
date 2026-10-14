@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, query, where, orderBy, getDocs, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/firebase/config';
 import { Banner } from '@/types';
 import Skeleton from '../ui/Skeleton';
@@ -12,18 +12,22 @@ const HeroBanner: React.FC = () => {
   useEffect(() => {
     const fetchHeroBanner = async () => {
       try {
-        // Asumimos que los banners con orden 1 o un tag específico son para el Hero.
-        // Aquí filtramos el banner activo de mayor prioridad.
+        // Quitamos el orderBy y limit de Firestore para evitar el error del índice
         const q = query(
           collection(db, 'banners'),
-          where('activo', '==', true),
-          orderBy('orden', 'asc'),
-          limit(1)
+          where('activo', '==', true)
         );
         
         const snapshot = await getDocs(q);
         if (!snapshot.empty) {
-          setBanner({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Banner);
+          // Convertimos los documentos a un array
+          const bannersList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Banner[];
+          
+          // Ordenamos el array en JavaScript de menor a mayor orden
+          bannersList.sort((a, b) => (a.orden || 0) - (b.orden || 0));
+          
+          // Guardamos el primer banner de la lista ya ordenada
+          setBanner(bannersList[0]);
         }
       } catch (error) {
         console.error("Error fetching hero banner:", error);

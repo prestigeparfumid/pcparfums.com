@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/firebase/config';
 import { Product } from '@/types';
 import HeroBanner from '@/components/home/HeroBanner';
@@ -13,24 +13,27 @@ const Home: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Para el SEO dinámico en React, el título se maneja en SettingsContext, 
-    // pero aseguramos que la vista inicie arriba
+    // Aseguramos que la vista inicie arriba
     window.scrollTo(0, 0);
 
     const fetchFeatured = async () => {
       try {
+        // Consultamos únicamente los activos sin filtros compuestos en Firestore
         const q = query(
           collection(db, 'products'),
-          where('activo', '==', true),
-          where('destacado', '==', true),
-          limit(4)
+          where('activo', '==', true)
         );
+        
         const snapshot = await getDocs(q);
-        const products = snapshot.docs.map(doc => ({
+        const allProducts = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         })) as Product[];
-        setFeaturedProducts(products);
+
+        // Filtramos los destacados y limitamos a 4 en JavaScript
+        const featured = allProducts.filter(p => p.destacado).slice(0, 4);
+        
+        setFeaturedProducts(featured);
       } catch (error) {
         console.error("Error cargando destacados:", error);
       } finally {

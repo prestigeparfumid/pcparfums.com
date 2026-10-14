@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useForm } from 'react-form'; // Utilizaremos react-hook-form
+import { useNavigate } from 'react-router-dom';
 import { useForm as useReactHookForm } from 'react-hook-form';
 import { ShieldCheck, Truck, Lock } from 'lucide-react';
 import { useCart } from '@/context/CartContext';
 import { useSettings } from '@/context/SettingsContext';
 import { formatCurrency } from '@/utils/formatters';
-import { apiService } from '@/services/api';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '@/firebase/config';
 import toast from 'react-hot-toast';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
@@ -52,7 +52,6 @@ const Checkout: React.FC = () => {
 
     setIsProcessing(true);
     
-    // Preparar el payload con el modelo de backend
     const orderItems = items.map(item => ({
       productId: item.product.id!,
       productName: item.product.nombre,
@@ -76,20 +75,88 @@ const Checkout: React.FC = () => {
         additionalInfo: data.additionalInfo || '',
       },
       items: orderItems,
+      subtotal,
+      shippingCost,
+      total,
       paymentMethod: data.paymentMethod,
+      status: 'pending',
+      createdAt: serverTimestamp()
     };
 
     try {
-      // Llamada al backend de Vercel para procesar orden
-      const response = await apiService.createOrder(orderData);
+      // 1. Guardar la orden en Firestore
+      const docRef = await addDoc(collection(db, 'orders'), orderData);
+      const orderId = docRef.id;
+      
+      // 2. Enviar notificación a Telegram
+      await enviarNotificacionTelegram(orderId, orderData, orderItems);
+      
       clearCart();
       toast.success("¡Pedido procesado con éxito!");
-      navigate(`/pedido-confirmado/${response.orderId}`);
+      
+      // 3. Redirigir
+      navigate(`/pedido-confirmado/${orderId}`);
     } catch (error: any) {
-      console.error("Error creating order:", error);
-      toast.error(error.message || "Ocurrió un error al procesar el pedido. Intenta nuevamente.");
+      console.error("Error al procesar el pedido:", error);
+      toast.error("Ocurrió un error al procesar el pedido. Intenta nuevamente.");
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // Función para armar y enviar el mensaje a Telegram
+  const enviarNotificacionTelegram = async (orderId: string, data: any, orderItems: any[]) => {
+    const BOT_TOKEN = import.meta.env.VITE_TELEGRAM_BOT_TOKEN;
+    const CHAT_ID = import.meta.env.VITE_TELEGRAM_CHAT_ID;
+
+    if (!BOT_TOKEN || !CHAT_ID) {
+      console.warn("Faltan las credenciales de Telegram en el archivo .env");
+      return;
+    }
+
+    const metodoPago = data.paymentMethod === 'cash_on_delivery' ? '💵 Efectivo Contraentrega' : '📱 Nequi Contraentrega';
+    
+    // Armar el listado de productos
+    let listaProductos = '';
+    orderItems.forEach((item, index) => {
+      listaProductos += `${index + 1}. ${item.quantity}x ${item.productName} (${item.presentation}) - ${formatCurrency(item.subtotal)}\n`;
+    });
+
+    // Construir el mensaje bonito con formato Markdown o HTML
+    const mensaje = `
+🚨 *¡NUEVO PEDIDO EN PRESTIGE PARFUM!* 🚨
+
+🛒 *ID del Pedido:* \`${orderId}\`
+👤 *Cliente:* ${data.customer.name}
+📞 *Teléfono:* ${data.customer.phone}
+📍 *Dirección:* ${data.shipping.address}, ${data.shipping.city} (${data.shipping.department})
+📝 *Info Extra:* ${data.shipping.additionalInfo || 'N/A'}
+
+💳 *Método de Pago:* ${metodoPago}
+
+📦 *PRODUCTOS:*
+${listaProductos}
+💰 *Subtotal:* ${formatCurrency(data.subtotal)}
+🚚 *Envío:* ${data.shippingCost === 0 ? 'Gratis' : formatCurrency(data.shippingCost)}
+💎 *TOTAL A PAGAR: ${formatCurrency(data.total)}*
+    `;
+
+    try {
+      const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: CHAT_ID,
+          text: mensaje,
+          parse_mode: 'Markdown'
+        })
+      });
+    } catch (error) {
+      console.error("Error al enviar notificación a Telegram:", error);
+      // No lanzamos el error para no bloquear la compra del usuario si Telegram falla
     }
   };
 

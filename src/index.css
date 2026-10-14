@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-primary-black text-primary-white overflow-x-hidden;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif tracking-wide;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-primary-black;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-dark-grey rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-mid-grey;
+  }
+
+  /* Hide arrows on number inputs */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-pure-white text-primary-black px-8 py-3 font-sans font-medium uppercase tracking-wider text-sm transition-all duration-300 hover:bg-light-grey disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply bg-transparent border border-pure-white text-pure-white px-8 py-3 font-sans font-medium uppercase tracking-wider text-sm transition-all duration-300 hover:bg-pure-white hover:text-primary-black disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .input-field {
+    @apply w-full bg-surface-black border border-dark-grey rounded-none px-4 py-3 text-pure-white placeholder-mid-grey focus:outline-none focus:border-pure-white transition-colors duration-300;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-light-grey mb-2 uppercase tracking-wide;
+  }
+
+  .glass-panel {
+    @apply bg-surface-black/80 backdrop-blur-md border border-dark-grey;
+  }
+}
+
+/* Animaciones personalizadas */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

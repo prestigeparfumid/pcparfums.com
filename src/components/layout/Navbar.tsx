@@ -60,7 +60,7 @@ const Navbar: React.FC = () => {
                 <img 
                   src={settings.branding.logoUrl} 
                   alt={settings.name} 
-                  className="h-12 md:h-14 w-auto object-contain"
+                  className="h-10 md:h-12 w-auto object-contain"
                 />
               ) : (
                 <span className="font-serif text-2xl md:text-3xl font-bold tracking-widest text-pure-white uppercase">

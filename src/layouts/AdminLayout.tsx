@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
-import AdminSidebar from '@/components/admin/AdminSidebar';
+import AdminSideBar from '@/components/admin/AdminSidebar';
 import AdminHeader from '@/components/admin/AdminHeader';
 import LoadingSpinner from '@/components/LoadingSpinner';
 

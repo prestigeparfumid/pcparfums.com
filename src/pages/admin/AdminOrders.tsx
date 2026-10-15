@@ -39,28 +39,17 @@ const AdminOrders: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  const handleStatusChange = async (orderId: string, docId: string, newStatus: OrderStatus) => {
+  const handleStatusChange = async (orderDisplayId: string, docId: string, newStatus: OrderStatus) => {
     try {
       const orderRef = doc(db, 'orders', docId);
       
-      // Actualizamos el estado y agregamos al historial
-      const changeEntry = {
-        status: newStatus,
-        changedAt: new Date(),
-        changedBy: 'admin' // Idealmente sacaríamos el UID o email de AuthContext
-      };
-
-      // En la vida real haríamos un updateDoc y usaríamos arrayUnion,
-      // simplificamos actualizando el estado y metiendo un nuevo objeto al array en BD (asumiendo que Firebase manejará merge si se configura)
-      // Para efectos prácticos de este prototipo:
       await updateDoc(orderRef, {
         status: newStatus,
         updatedAt: new Date()
       });
 
-      toast.success(`Pedido ${orderId} actualizado a ${translateOrderStatus(newStatus)}`);
+      toast.success(`Pedido ${orderDisplayId} actualizado a ${translateOrderStatus(newStatus)}`);
       
-      // Si el modal está abierto, actualizamos su estado localmente para no cerrarlo abruptamente
       if (selectedOrder && selectedOrder.id === docId) {
         setSelectedOrder({ ...selectedOrder, status: newStatus });
       }
@@ -72,10 +61,20 @@ const AdminOrders: React.FC = () => {
   };
 
   const filteredOrders = orders.filter(order => {
+    // 1. Convertimos la búsqueda a minúsculas de forma segura
+    const term = (searchTerm || '').toLowerCase();
+    
+    // 2. Protegemos cada propiedad con (valor || '') y el encadenamiento opcional (?.)
+    // Usamos order.id como respaldo por si order.orderId no existe
+    const displayId = (order.orderId || order.id || '').toLowerCase();
+    const customerName = (order.customer?.name || '').toLowerCase();
+    const customerPhone = (order.customer?.phone || '').toLowerCase();
+
+    // 3. Evaluamos
     const matchesSearch = 
-      order.orderId.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      order.customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.customer.phone.includes(searchTerm);
+      displayId.includes(term) || 
+      customerName.includes(term) ||
+      customerPhone.includes(term);
       
     const matchesStatus = statusFilter === 'todos' || order.status === statusFilter;
 
@@ -118,6 +117,7 @@ const AdminOrders: React.FC = () => {
               <option value="preparing">En Preparación</option>
               <option value="ready">Listos</option>
               <option value="shipped">Enviados</option>
+              <option value="in_transit">En Tránsito</option>
               <option value="delivered">Entregados</option>
               <option value="cancelled">Cancelados</option>
             </select>
@@ -146,50 +146,55 @@ const AdminOrders: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((order) => (
-                  <tr key={order.id} className="border-b border-dark-grey border-opacity-50 hover:bg-dark-grey/20 transition-colors">
-                    <td className="px-6 py-4 text-pure-white font-medium">{order.orderId}</td>
-                    <td className="px-6 py-4">
-                      <p className="text-pure-white">{order.customer.name}</p>
-                      <p className="text-mid-grey text-xs mt-1">{order.customer.phone}</p>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="text-light-grey text-xs uppercase tracking-wider">
-                        {translatePaymentMethod(order.paymentMethod)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-pure-white">{formatCurrency(order.total)}</td>
-                    <td className="px-6 py-4">
-                      <select
-                        className={`bg-primary-black border border-dark-grey text-xs uppercase font-bold py-1 px-2 focus:outline-none focus:border-pure-white ${
-                           order.status === 'delivered' ? 'text-green-500' :
-                           order.status === 'cancelled' ? 'text-red-500' :
-                           'text-pure-white'
-                        }`}
-                        value={order.status}
-                        onChange={(e) => handleStatusChange(order.orderId, order.id!, e.target.value as OrderStatus)}
-                      >
-                        <option value="pending">Pendiente</option>
-                        <option value="confirmed">Confirmado</option>
-                        <option value="preparing">En Preparación</option>
-                        <option value="ready">Listo</option>
-                        <option value="shipped">Enviado</option>
-                        <option value="in_transit">En Tránsito</option>
-                        <option value="delivered">Entregado</option>
-                        <option value="cancelled">Cancelado</option>
-                      </select>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <button 
-                        onClick={() => setSelectedOrder(order)}
-                        className="p-2 text-mid-grey hover:text-pure-white transition-colors bg-primary-black border border-dark-grey hover:border-pure-white"
-                        title="Ver Detalles"
-                      >
-                        <Eye size={16} />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                filteredOrders.map((order) => {
+                  const displayId = order.orderId || order.id || 'N/A';
+                  return (
+                    <tr key={order.id} className="border-b border-dark-grey border-opacity-50 hover:bg-dark-grey/20 transition-colors">
+                      <td className="px-6 py-4 text-pure-white font-medium">
+                        <span className="truncate block max-w-[120px]" title={displayId}>{displayId}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-pure-white">{order.customer?.name || 'Sin nombre'}</p>
+                        <p className="text-mid-grey text-xs mt-1">{order.customer?.phone || 'Sin teléfono'}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-light-grey text-xs uppercase tracking-wider">
+                          {translatePaymentMethod(order.paymentMethod)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-pure-white">{formatCurrency(order.total)}</td>
+                      <td className="px-6 py-4">
+                        <select
+                          className={`bg-primary-black border border-dark-grey text-xs uppercase font-bold py-1 px-2 focus:outline-none focus:border-pure-white ${
+                             order.status === 'delivered' ? 'text-green-500' :
+                             order.status === 'cancelled' ? 'text-red-500' :
+                             'text-pure-white'
+                          }`}
+                          value={order.status || 'pending'}
+                          onChange={(e) => handleStatusChange(displayId, order.id!, e.target.value as OrderStatus)}
+                        >
+                          <option value="pending">Pendiente</option>
+                          <option value="confirmed">Confirmado</option>
+                          <option value="preparing">En Preparación</option>
+                          <option value="ready">Listo</option>
+                          <option value="shipped">Enviado</option>
+                          <option value="in_transit">En Tránsito</option>
+                          <option value="delivered">Entregado</option>
+                          <option value="cancelled">Cancelado</option>
+                        </select>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button 
+                          onClick={() => setSelectedOrder(order)}
+                          className="p-2 text-mid-grey hover:text-pure-white transition-colors bg-primary-black border border-dark-grey hover:border-pure-white"
+                          title="Ver Detalles"
+                        >
+                          <Eye size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

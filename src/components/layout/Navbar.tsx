@@ -39,11 +39,11 @@ const Navbar: React.FC = () => {
           : 'bg-transparent py-6'
       }`}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
         <div className="flex justify-between items-center">
           
-          {/* Menú Móvil - Botón */}
-          <div className="flex items-center md:hidden">
+          {/* Menú Móvil - Botón (Z-10 agregado para que reciba el clic) */}
+          <div className="flex items-center md:hidden relative z-10">
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="text-pure-white hover:text-light-grey transition-colors p-2"
@@ -53,8 +53,8 @@ const Navbar: React.FC = () => {
             </button>
           </div>
 
-          {/* Logo */}
-          <div className="flex-shrink-0 flex items-center justify-center md:justify-start w-full md:w-auto absolute left-1/2 -translate-x-1/2 md:static md:translate-x-0">
+          {/* Logo (w-full removido para que no tape los botones) */}
+          <div className="flex-shrink-0 flex items-center justify-center md:justify-start absolute left-1/2 -translate-x-1/2 md:static md:translate-x-0">
             <Link to="/" className="flex items-center">
               {settings.branding.logoUrl ? (
                 <img 
@@ -85,8 +85,8 @@ const Navbar: React.FC = () => {
             ))}
           </div>
 
-          {/* Iconos Derecha (Carrito y Admin) */}
-          <div className="flex items-center space-x-4 md:space-x-6">
+          {/* Iconos Derecha (Z-10 agregado para proteger los clics) */}
+          <div className="flex items-center space-x-4 md:space-x-6 relative z-10">
             <Link 
               to="/admin/login" 
               className="text-pure-white hover:text-mid-grey transition-colors"
@@ -113,7 +113,7 @@ const Navbar: React.FC = () => {
       {/* Menú Móvil - Contenido */}
       <div 
         className={`md:hidden absolute top-full left-0 w-full bg-surface-black/95 backdrop-blur-xl border-b border-dark-grey transition-all duration-300 overflow-hidden ${
-          isMobileMenuOpen ? 'max-h-64 opacity-100' : 'max-h-0 opacity-0'
+          isMobileMenuOpen ? 'max-h-64 opacity-100' : 'max-h-0 opacity-0 pointer-events-none'
         }`}
       >
         <div className="px-4 py-6 space-y-4 flex flex-col items-center">

@@ -1,8 +1,6 @@
 User-agent: *
 Allow: /
-Disallow: /admin
 Disallow: /admin/
-Disallow: /checkout
-Disallow: /carrito
+Disallow: /admin/*
 
-Sitemap: https://prestigeparfumcollection.com/sitemap.xml
+Sitemap: https://pcparfums.com/sitemap.xml

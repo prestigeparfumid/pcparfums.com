@@ -1,8 +1,16 @@
 import { useState, FormEvent } from 'react';
 import { db } from '@/firebase/config';
 import { doc, getDoc } from 'firebase/firestore';
-import { formatCurrency } from '@/utils/formatCurrency';
 import { Search, Package, MapPin, Calendar, ArrowRight } from 'lucide-react';
+
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('es-CO', {
+    style: 'currency',
+    currency: 'COP',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount || 0);
+};
 
 export const OrderTracking = () => {
   const [orderId, setOrderId] = useState('');

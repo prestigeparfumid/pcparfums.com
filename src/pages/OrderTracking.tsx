@@ -1,161 +1,389 @@
-import { useState, FormEvent } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams, Link } from 'react-router-dom';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/firebase/config';
-import { doc, getDoc } from 'firebase/firestore';
-import { Search, Package, MapPin, Calendar, ArrowRight } from 'lucide-react';
+import { Order, OrderStatus } from '@/types';
+import { formatCurrency, translateOrderStatus, translatePaymentMethod } from '@/utils/formatters';
+import {
+  Search,
+  Package,
+  CheckCircle2,
+  Truck,
+  Clock,
+  XCircle,
+  MapPin,
+  ArrowLeft,
+  Sparkles
+} from 'lucide-react';
+import toast from 'react-hot-toast';
 
-const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount || 0);
-};
+const ORDER_STEPS: { key: OrderStatus[]; label: string; description: string; icon: React.ElementType }[] = [
+  {
+    key: ['pending'],
+    label: 'Pedido Recibido',
+    description: 'Hemos recibido tu solicitud y estamos validando los datos.',
+    icon: Clock,
+  },
+  {
+    key: ['confirmed'],
+    label: 'Confirmado',
+    description: 'Tu pedido ha sido confirmado y asignado a despacho.',
+    icon: CheckCircle2,
+  },
+  {
+    key: ['preparing', 'ready'],
+    label: 'En Preparación',
+    description: 'Estamos alistando y verificando tus fragancias.',
+    icon: Sparkles,
+  },
+  {
+    key: ['shipped', 'in_transit'],
+    label: 'En Camino',
+    description: 'Tu paquete va en ruta hacia la dirección de entrega.',
+    icon: Truck,
+  },
+  {
+    key: ['delivered'],
+    label: 'Entregado',
+    description: 'El pedido fue entregado con éxito.',
+    icon: Package,
+  },
+];
 
-export const OrderTracking = () => {
-  const [orderId, setOrderId] = useState('');
-  const [order, setOrder] = useState<any | null>(null);
+const OrderTracking: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchInput, setSearchInput] = useState(searchParams.get('id') || '');
+  const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [searched, setSearched] = useState(false);
 
-  const handleTrack = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!orderId.trim()) return;
+  const fetchOrder = async (rawId: string) => {
+    const cleanId = rawId.trim();
+    if (!cleanId) {
+      toast.error('Por favor ingresa un número de pedido.');
+      return;
+    }
 
     setLoading(true);
-    setError('');
+    setSearched(true);
     setOrder(null);
 
     try {
-      const cleanId = orderId.trim();
+      // 1. Intentar buscar directamente por ID de documento en Firestore
       const docRef = doc(db, 'orders', cleanId);
       const docSnap = await getDoc(docRef);
 
       if (docSnap.exists()) {
-        setOrder({ id: docSnap.id, ...docSnap.data() });
-      } else {
-        setError('No encontramos ningún pedido con este código. Verifica que esté bien escrito.');
+        setOrder({ id: docSnap.id, ...docSnap.data() } as Order);
+        setLoading(false);
+        return;
       }
-    } catch (err) {
-      console.error("Error consultando el pedido:", err);
-      setError('Hubo un error al buscar el pedido. Intenta de nuevo.');
+
+      // 2. Si no coincide con el ID del documento, buscar por el campo interno 'orderId'
+      const ordersRef = collection(db, 'orders');
+      const qExact = query(ordersRef, where('orderId', '==', cleanId));
+      const snapExact = await getDocs(qExact);
+
+      if (!snapExact.empty) {
+        const found = snapExact.docs[0];
+        setOrder({ id: found.id, ...found.data() } as Order);
+        setLoading(false);
+        return;
+      }
+
+      // 3. Intentar en mayúsculas por si el cliente escribió el código en minúsculas
+      const qUpper = query(ordersRef, where('orderId', '==', cleanId.toUpperCase()));
+      const snapUpper = await getDocs(qUpper);
+
+      if (!snapUpper.empty) {
+        const found = snapUpper.docs[0];
+        setOrder({ id: found.id, ...found.data() } as Order);
+      } else {
+        toast.error('No encontramos ningún pedido con ese código.');
+      }
+    } catch (error) {
+      console.error('Error al buscar pedido:', error);
+      toast.error('Ocurrió un error al consultar el pedido.');
     } finally {
       setLoading(false);
     }
   };
 
-  const getStatusBadge = (estado: string) => {
-    switch (estado?.toLowerCase()) {
-      case 'entregado':
-        return 'bg-green-100 text-green-700 border-green-200';
-      case 'enviado':
-        return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'empacado':
-        return 'bg-purple-100 text-purple-700 border-purple-200';
-      case 'cancelado':
-        return 'bg-slate-200 text-slate-600 border-slate-200';
-      default:
-        return 'bg-red-50 text-red-600 border-red-200';
+  useEffect(() => {
+    const idFromUrl = searchParams.get('id');
+    if (idFromUrl) {
+      setSearchInput(idFromUrl);
+      fetchOrder(idFromUrl);
+    }
+  }, []);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanId = searchInput.trim();
+    if (!cleanId) return;
+    setSearchParams({ id: cleanId });
+    fetchOrder(cleanId);
+  };
+
+  const getActiveStepIndex = (status?: OrderStatus): number => {
+    if (!status || status === 'cancelled') return -1;
+    return ORDER_STEPS.findIndex((step) => step.key.includes(status));
+  };
+
+  const formatDate = (timestamp: any): string => {
+    if (!timestamp) return 'Fecha no disponible';
+    try {
+      const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp);
+      return date.toLocaleDateString('es-CO', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return 'Fecha no disponible';
     }
   };
 
+  const activeStep = getActiveStepIndex(order?.status);
+  const displayOrderId = order?.orderId || order?.id || '';
+
   return (
-    <div className="min-h-[70vh] bg-slate-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-3xl mx-auto">
-        
-        <div className="text-center mb-10">
-          <h1 className="text-4xl font-black text-slate-900 uppercase tracking-tight mb-3">Rastrea tu Par</h1>
-          <p className="text-slate-500 font-medium text-sm">Ingresa el código de pedido que recibiste al finalizar tu compra.</p>
+    <div className="min-h-screen bg-primary-black text-pure-white pt-28 pb-20 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-3xl mx-auto space-y-8">
+        {/* Volver */}
+        <div>
+          <Link
+            to="/catalogo"
+            className="inline-flex items-center gap-2 text-xs font-sans uppercase tracking-widest text-mid-grey hover:text-pure-white transition-colors"
+          >
+            <ArrowLeft size={14} />
+            Volver al Catálogo
+          </Link>
         </div>
 
-        {/* Buscador */}
-        <div className="bg-white p-6 rounded-sm shadow-sm border border-slate-200 mb-8">
-          <form onSubmit={handleTrack} className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-grow">
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                <Search size={20} className="text-slate-400" />
-              </div>
-              <input 
-                type="text" 
-                value={orderId}
-                onChange={(e) => setOrderId(e.target.value)}
-                placeholder="Ej: ABC123XYZ890" 
-                className="w-full pl-11 pr-4 py-4 bg-slate-50 border border-slate-300 rounded-sm focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition-all font-mono text-sm"
-                required
+        {/* Encabezado */}
+        <div className="text-center space-y-3 border-b border-dark-grey pb-8">
+          <h1 className="font-serif text-3xl md:text-4xl uppercase tracking-widest text-pure-white">
+            Rastreo de Pedido
+          </h1>
+          <p className="text-sm font-sans text-mid-grey max-w-md mx-auto">
+            Ingresa el código de referencia de tu orden para conocer el estado actual de tu envío en tiempo real.
+          </p>
+        </div>
+
+        {/* Formulario de Búsqueda */}
+        <form onSubmit={handleSubmit} className="bg-surface-black border border-dark-grey p-6">
+          <label
+            htmlFor="order-id-input"
+            className="block text-xs font-sans uppercase tracking-widest text-light-grey mb-3"
+          >
+            Número de Pedido / Referencia
+          </label>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-mid-grey"
+                size={18}
+              />
+              <input
+                id="order-id-input"
+                type="text"
+                placeholder="Ej: Ord-12345 o ID de referencia"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="w-full bg-primary-black border border-dark-grey py-3 pl-11 pr-4 text-sm font-sans text-pure-white placeholder-mid-grey focus:outline-none focus:border-pure-white transition-colors"
               />
             </div>
-            <button 
+            <button
               type="submit"
               disabled={loading}
-              className="bg-red-600 text-white px-8 py-4 rounded-sm font-black uppercase tracking-wider hover:bg-red-700 transition-colors shadow-md disabled:opacity-70 flex items-center justify-center gap-2 whitespace-nowrap"
+              className="bg-pure-white text-primary-black font-sans text-xs font-bold uppercase tracking-widest px-8 py-3 hover:bg-light-grey transition-colors disabled:opacity-50"
             >
-              {loading ? 'Buscando...' : 'Rastrear'} <ArrowRight size={20} />
+              {loading ? 'Buscando...' : 'Consultar'}
             </button>
-          </form>
+          </div>
+        </form>
 
-          {error && (
-            <div className="mt-4 p-4 bg-red-50 text-red-600 text-sm font-bold border border-red-200 rounded-sm text-center">
-              {error}
-            </div>
-          )}
-        </div>
+        {/* Estado: No encontrado */}
+        {!loading && searched && !order && (
+          <div className="bg-surface-black border border-dark-grey p-8 text-center space-y-3">
+            <XCircle className="mx-auto text-mid-grey" size={32} strokeWidth={1.5} />
+            <h2 className="font-serif text-lg uppercase tracking-widest text-pure-white">
+              Pedido no encontrado
+            </h2>
+            <p className="text-sm font-sans text-mid-grey max-w-md mx-auto">
+              Verifica que el código esté escrito exactamente como aparece en tu confirmación de compra o contáctanos por WhatsApp para ayudarte.
+            </p>
+          </div>
+        )}
 
-        {/* Resultados del Pedido */}
-        {order && (
-          <div className="bg-white rounded-sm shadow-sm border-t-4 border-red-600 overflow-hidden animate-fade-in">
-            <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        {/* Resultado del Pedido */}
+        {!loading && order && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Cabecera del Pedido */}
+            <div className="bg-surface-black border border-dark-grey p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Código de Pedido</p>
-                <p className="text-lg font-mono font-black text-slate-900">{order.id}</p>
+                <p className="text-xs font-sans uppercase tracking-widest text-mid-grey">
+                  Referencia de Orden
+                </p>
+                <p className="font-serif text-xl text-pure-white mt-1 break-all">
+                  {displayOrderId}
+                </p>
+                <p className="text-xs font-sans text-mid-grey mt-1">
+                  Realizado el {formatDate(order.createdAt)}
+                </p>
               </div>
-              <div className={`px-4 py-2 border rounded-sm font-black uppercase tracking-wider text-xs ${getStatusBadge(order.estado)}`}>
-                Estado: {order.estado || 'Pendiente'}
+
+              <div className="sm:text-right">
+                <span
+                  className={`inline-block px-3 py-1.5 border text-xs font-sans font-bold uppercase tracking-widest ${
+                    order.status === 'delivered'
+                      ? 'border-green-500/50 text-green-400 bg-green-500/10'
+                      : order.status === 'cancelled'
+                      ? 'border-red-500/50 text-red-400 bg-red-500/10'
+                      : 'border-pure-white/40 text-pure-white bg-primary-black'
+                  }`}
+                >
+                  {translateOrderStatus(order.status || 'pending')}
+                </span>
               </div>
             </div>
 
-            <div className="p-6 bg-slate-50 border-b border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="flex items-start gap-3">
-                <MapPin className="text-red-600 mt-0.5" size={20} />
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Dirección de Entrega</p>
-                  <p className="text-sm font-medium text-slate-700">{order.direccion}</p>
-                  <p className="text-sm font-bold text-slate-900 mt-1">{order.cliente}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3">
-                <Calendar className="text-red-600 mt-0.5" size={20} />
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Fecha del Pedido</p>
-                  <p className="text-sm font-medium text-slate-700">
-                    {order.fecha ? new Date(order.fecha.toDate()).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Reciente'}
-                  </p>
-                </div>
-              </div>
-            </div>
+            {/* Línea de Tiempo / Estado */}
+            <div className="bg-surface-black border border-dark-grey p-6">
+              <h2 className="font-serif text-sm uppercase tracking-widest text-pure-white mb-6 border-b border-dark-grey pb-3">
+                Estado del Envío
+              </h2>
 
-            <div className="p-6">
-              <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 mb-4 flex items-center gap-2">
-                <Package size={18} className="text-red-600" /> Resumen de Artículos
-              </h3>
-              
-              <div className="space-y-4 mb-6">
-                {order.items?.map((item: any, idx: number) => (
-                  <div key={idx} className="flex items-center gap-4 border border-slate-100 p-3 rounded-sm">
-                    <img src={item.imagen} alt={item.nombre} className="w-16 h-16 object-cover bg-slate-50 border border-slate-200 rounded-sm" />
-                    <div className="flex-grow">
-                      <p className="font-bold text-slate-900 uppercase text-sm">{item.nombre}</p>
-                      <p className="text-xs font-bold text-slate-500 uppercase">Talla: <span className="text-red-600">{item.talla}</span> | Cant: {item.cantidad}</p>
-                    </div>
-                    <p className="font-mono font-black text-slate-900 text-sm">
-                      {formatCurrency(item.precio * item.cantidad)}
+              {order.status === 'cancelled' ? (
+                <div className="flex items-start gap-4 p-4 bg-red-950/20 border border-red-500/30">
+                  <XCircle className="text-red-400 flex-shrink-0 mt-0.5" size={22} />
+                  <div>
+                    <h3 className="font-sans text-sm font-bold uppercase tracking-wider text-red-400">
+                      Pedido Cancelado
+                    </h3>
+                    <p className="font-sans text-xs text-light-grey mt-1">
+                      Esta orden fue cancelada. Si tienes dudas o deseas reactivarla, comunícate con nuestro equipo de atención.
                     </p>
                   </div>
-                ))}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {ORDER_STEPS.map((step, index) => {
+                    const Icon = step.icon;
+                    const isCompleted = activeStep >= index;
+                    const isCurrent = activeStep === index;
+
+                    return (
+                      <div key={step.label} className="flex items-start gap-4 relative">
+                        <div
+                          className={`w-9 h-9 flex items-center justify-center border flex-shrink-0 transition-colors ${
+                            isCompleted
+                              ? 'bg-pure-white text-primary-black border-pure-white'
+                              : 'bg-primary-black text-mid-grey border-dark-grey'
+                          }`}
+                        >
+                          <Icon size={18} />
+                        </div>
+
+                        <div className="flex-1 pt-1">
+                          <div className="flex items-center gap-2">
+                            <h3
+                              className={`font-sans text-sm uppercase tracking-wider font-semibold ${
+                                isCompleted ? 'text-pure-white' : 'text-mid-grey'
+                              }`}
+                            >
+                              {step.label}
+                            </h3>
+                            {isCurrent && (
+                              <span className="text-[10px] uppercase tracking-widest px-2 py-0.5 bg-pure-white/10 text-pure-white border border-pure-white/20">
+                                Actual
+                              </span>
+                            )}
+                          </div>
+                          <p className="font-sans text-xs text-mid-grey mt-1">
+                            {step.description}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Resumen de Entrega y Productos */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Datos de Entrega */}
+              <div className="bg-surface-black border border-dark-grey p-6 space-y-4">
+                <h2 className="font-serif text-sm uppercase tracking-widest text-pure-white border-b border-dark-grey pb-3 flex items-center gap-2">
+                  <MapPin size={16} />
+                  Datos de Entrega
+                </h2>
+                <div className="space-y-2 text-sm font-sans">
+                  <p className="text-pure-white font-medium">
+                    {order.customer?.name || 'Cliente'}
+                  </p>
+                  {order.customer?.phone && (
+                    <p className="text-mid-grey text-xs">Tel: {order.customer.phone}</p>
+                  )}
+                  {order.customer?.city && (
+                    <p className="text-light-grey text-xs">
+                      Ciudad: {order.customer.city}
+                    </p>
+                  )}
+                  {order.customer?.address && (
+                    <p className="text-light-grey text-xs">
+                      Dirección: {order.customer.address}
+                    </p>
+                  )}
+                  <div className="pt-2 border-t border-dark-grey/60">
+                    <p className="text-xs text-mid-grey uppercase tracking-wider">
+                      Método de Pago
+                    </p>
+                    <p className="text-xs text-pure-white uppercase mt-0.5">
+                      {translatePaymentMethod(order.paymentMethod)}
+                    </p>
+                  </div>
+                </div>
               </div>
 
-              <div className="border-t-2 border-slate-200 pt-4 flex justify-between items-center">
-                <span className="font-black uppercase tracking-wider text-slate-900 text-sm">Total Pagado</span>
-                <span className="text-2xl font-black font-mono text-red-600">{formatCurrency(order.total)}</span>
+              {/* Resumen de Fragancias */}
+              <div className="bg-surface-black border border-dark-grey p-6 flex flex-col justify-between">
+                <div>
+                  <h2 className="font-serif text-sm uppercase tracking-widest text-pure-white border-b border-dark-grey pb-3 mb-4">
+                    Artículos ({(order.items || []).length})
+                  </h2>
+                  <div className="space-y-3 max-h-48 overflow-y-auto pr-1">
+                    {(order.items || []).map((item: any, idx: number) => (
+                      <div
+                        key={item.id || idx}
+                        className="flex justify-between items-start text-xs font-sans border-b border-dark-grey/40 pb-2"
+                      >
+                        <div>
+                          <p className="text-pure-white font-medium">
+                            {item.name || 'Producto'}
+                          </p>
+                          <p className="text-mid-grey">Cantidad: {item.quantity || 1}</p>
+                        </div>
+                        <p className="text-light-grey">
+                          {formatCurrency((item.price || 0) * (item.quantity || 1))}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-4 mt-4 border-t border-dark-grey flex justify-between items-center">
+                  <span className="font-sans text-xs uppercase tracking-widest text-mid-grey">
+                    Total
+                  </span>
+                  <span className="font-serif text-lg text-pure-white">
+                    {formatCurrency(order.total || 0)}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
